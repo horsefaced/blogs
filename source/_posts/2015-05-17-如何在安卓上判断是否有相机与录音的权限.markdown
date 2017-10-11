@@ -1,0 +1,51 @@
+---
+layout: post
+title: 如何在android上判断是否有相机与录音的权限
+category: android
+date: 2015-05-17
+---
+
+Android本身有提供`checkPermission(String, String)`这一系列的函数来检查某个程序是否有某个权限。但这系列数实际上是在检查AndroidManifest里那`user-permission`里是否写上了某个权限。大家都知道，这根本行不通，因为安装时那些权限根本没地方让用户部分接受。用户要么全接受一个普通的程序居然有定位读通讯录删除短信这种权限，要么就完全的不能装这个程序了。在一些android机子上，比如华为，会有权限管理这一项。里面可以将程序的一些权限关掉，比如定位、读通讯录、相机还有录音之类的。这个设置就无法通过`checkPermission(String, String)`这一系列的函数来得到正确的结果了。
+<!-- more -->
+本人在项目中还没有用到通讯录权限，但有用到相机与录音，于是本文就集中于相机与录音的权限判断上了。其实代码很简单，具体做法就是在实际操作前先操作一遍录音与相机，看是否能得到结果，如果不能就说明对应的权限没有开放，以下为代码：
+
+```java
+    public boolean hasPermission(String permission) {
+		switch (permission) {
+		case Manifest.permission.CAMERA:
+			try {
+                //实际测试说明如果关闭了相机权限，在camera.open的时候会返回RuntimeException
+				Camera camera = Camera.open();
+				camera.release();
+				return true;
+			} catch (RuntimeException e) {
+				return false;
+			}
+		case Manifest.permission.RECORD_AUDIO:
+			MediaRecorder recorder = new MediaRecorder();
+			recorder.reset();
+			recorder.setAudioSource(MediaRecorder.AudioSource.MIC);
+			recorder.setOutputFormat(MediaRecorder.OutputFormat.THREE_GPP);
+			recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
+			String file = Dict.FILE_PATH.USER_CHAT + SysUtils.getRandomString() + ".aac";
+			recorder.setOutputFile(file);
+			try {
+				recorder.prepare();
+				recorder.start();
+				File soundFile = new File(file);
+                //实际测试说明如果关闭了录音权限，因为无法得到数据流，就不会建立对应的输出文件
+				return soundFile.exists();
+			} catch (IllegalStateException | IOException e) {
+				return false;
+			} finally {
+				recorder.stop();
+				recorder.release();
+			}
+		default:
+			return getApplication().getPackageManager().checkPermission(permission, MedicalApp.getInstance().getPackageName()) == PackageManager.PERMISSION_GRANTED;
+		}
+
+	}
+```
+
+这里就只实现了相机与录音两个权限的判断，其它的判断等到要使用时再更新。

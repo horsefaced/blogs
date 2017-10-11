@@ -1,0 +1,163 @@
+---
+layout: post
+title: 如何在android方便的修改字体
+categories: android
+date: 2015-05-17
+tags: [android]
+---
+
+android并没有提供一个一致性的统一的修改某个程序缺省字体的地方，于是网络上的方法：
+
+1. 在某个activity上得到所有要修改字体的控件，然后一个个的去修改。
+2. 自己实现所有要修改字体的控件的基础类，在这个类上去指定字体。
+3. 实现一个枚举方法，把activity上所有的控件列出，然后自动设置它们的字体。
+
+这三个方法第一个实在太不体现智能了。而第二个是基本是在做死。第三个不错，我一开始也是使用这个方法的。但在实际使用中遇到了如果动态生成的控件，比如listview中由adapter生成的控件是无法在一开始就被枚举到，于是也就无法修改字体。如果放到onDraw里，是很不现实的会严重影响性能。如果放到adapter中的话，就与第一种或第二种没什么不同了，总不能每一个adapter都给个这个函数吧？如果自己生成一个BaseAdapter的话，那不其它类型的adapter就不能用了。
+<!-- more -->
+其实有一个问题与修改字体这个问题很像，那就是如何修改菜单的样式。在网络上提供的都差不多，比如[如下网页][1]中的
+
+```java
+MenuAct.this.getLayoutInflater().setFactory(new android.view.LayoutInflater.Factory() {
+	/**
+	* name - Tag name to be inflated.<br/>
+	* context - The context the view is being created in.<br/>
+	* attrs - Inflation attributes as specified in XML file.<br/>
+	*/
+	public View onCreateView(String name, Context context, AttributeSet attrs) {
+		// 指定自定义inflate的对象
+		if (name.equalsIgnoreCase("com.android.internal.view.menu.IconMenuItemView")) {
+			try {
+				LayoutInflater f = getLayoutInflater();
+				final View view = f.createView(name, null, attrs);
+				new Handler().post(new Runnable() {
+					public void run() {
+						// 设置背景图片
+						view.setBackgroundResource(R.drawable.menu_background);
+					}
+				});
+				return view;
+			} catch (InflateException e) {
+				e.printStackTrace();
+			} catch (ClassNotFoundException e) {
+				e.printStackTrace();
+			}
+		}
+		return null;
+	}
+});
+```
+
+这段代码说明，其实用于创建view的inflater是可以被重写厂方法的。而创建view时，无非是从getSystemService(Context.LAYOUT\_INFLATER\_SERVICE)或者context中得到inflater来创建view。所以如果你的项目是从某个自定义的BaseActivity上来的话，那么只要在这里修改inflater的厂方法就能修改这个activity下所有建立view的方法了，不但包括Fragment，listview这种直接的view，还包括adapter上动态创建的view。
+
+我现在所在的项目也是这样一个基于自定义的BaseActivity上的项目，所以可以方便的直接在BaseActivity的onCreate函数上写上这个方法:
+
+```java
+	@Override
+	protected void onCreate(Bundle savedInstanceState) {
+	    super.onCreate(savedInstanceState);
+	    LayoutInflater inflater = (LayoutInflater) this.getSystemService(Context.LAYOUT_INFLATER_SERVICE);
+	    Factory oldFactory = inflater.getFactory();
+	    Factory2 oldFactory2 = inflater.getFactory2();
+	    if (!(oldFactory instanceof CustomInflaterFactory)) {
+	        CustomInflaterFactory factory = new CustomInflaterFactory(oldFactory, oldFactory2);
+	        try {
+	            Field field = LayoutInflater.class.getDeclaredField("mFactory");
+	            field.setAccessible(true);
+	            field.set(inflater, null);
+	            field = LayoutInflater.class.getDeclaredField("mFactory2");
+	            field.setAccessible(true);
+	            field.set(inflater, null);
+	            field = LayoutInflater.class.getDeclaredField("mFactorySet");
+	            field.setAccessible(true);
+	            field.setBoolean(inflater, false);
+	            inflater.setFactory(factory);
+	            field.setBoolean(inflater, false);
+	            inflater.setFactory2(factory);
+	        } catch (NoSuchFieldException | IllegalAccessException | IllegalArgumentException e) {
+	        }
+	    }
+
+	    Util.typefaceReplacer(findViewById(android.R.id.content));
+	}
+```
+
+相应的CustomInflaterFactory为：
+
+```java
+	public class CustomInflaterFactory implements Factory, Factory2 {
+
+	private Factory old;
+	private Factory2 old2;
+
+	public CustomInflaterFactory(Factory old, Factory2 old2) {
+	    this.old = old;
+	    this.old2 = old2;
+	}
+
+	@Override
+	public View onCreateView(String name, Context context, AttributeSet attrs) {
+	    LayoutInflater inflater = LayoutInflater.from(context);
+	    View view = null;
+	    try {
+	        view = inflater.createView(name, null, attrs);
+	    } catch (ClassNotFoundException | InflateException e) {
+	        view = null;
+	    }
+	    if (view == null && old != null) view = old.onCreateView(name, context, attrs);
+	    if (view != null) Util.typefaceReplacer(view);
+	    if (name.equalsIgnoreCase("android.support.v7.internal.view.menu.ActionMenuItemView")) ((TextView) view).setTextSize(16);
+	    return view;
+	}
+
+	@Override
+	public View onCreateView(View parent, String name, Context context, AttributeSet attrs) {
+	    if (old2 == null) return null;
+	    View view = old2.onCreateView(parent, name, context, attrs);
+	    if (view != null) Util.typefaceReplacer(view);
+	    return view;
+	}
+
+	}
+```
+
+这里的Util.typefaceReplacer为递归的修改某个viewgroup的字体的方法：
+
+```java
+	public static void typefaceReplacer(View view) {
+	    if (view instanceof ViewGroup) {
+	        ViewGroup vg = (ViewGroup) view;
+	        for (int i = 0; i < vg.getChildCount(); i++) {
+	            typefaceReplacer(vg.getChildAt(i));
+	        }
+	    }
+	    Method setTypefaceMethod = getMethod(view.getClass(), "setTypeface", Typeface.class);
+	    if (setTypefaceMethod != null) {
+	        try {
+	            setTypefaceMethod.invoke(view, getCustomFont());
+	        } catch (IllegalAccessException | IllegalArgumentException | InvocationTargetException e) {
+	        }
+	    }
+	}
+
+	public static Method getMethod(Class clazz, String name, Class<?>... params) {
+	    if (clazz == null) return null;
+
+	    Method method = null;
+	    try {
+	        method = clazz.getDeclaredMethod(name, params);
+	    } catch (NoSuchMethodException e) {
+	        method = null;
+	    }
+
+	    if (method == null) {
+	        method = getMethod(clazz.getSuperclass(), name, params);
+	    }
+	    return method;
+	}
+```
+
+通过找到所有有typeface方法的view，把它们的typeface设置为getCustomFont的自定义字体就可以省去判断哪些view要设置字体的问题了。现在说一下为什么在BaseActivty的onCreate中设置了自定义的inflater厂类后，还要再次调用typefaceReplacer这事情，这是因为我暂时还不知道的原因，对于第一个建立起来的Activity，它的第一个TextView会出现classLoader not found这种问题，从而对于这个TextView会因 if (view != null) Util.typefaceReplacer(view) 判断为null而无法替换字体。
+
+第一次用markdown，还是挺好用的嘛。
+
+[1]:	http://blog.csdn.net/sodino/article/details/6165132
