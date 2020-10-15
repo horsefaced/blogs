@@ -4,8 +4,6 @@ date: 2020-09-23 19:20:48
 tags:
 ---
 
-# 如何在.NET Core上建立Agora的AccessToken服务
-
 随着大量公司将办公会议、产品发布等改为网上进行后， 视频通信的安全性越来越成为受关注的重点。声网平台在 2.1.0 版本之后，通过使用 AccessToken 认证统一了视频通话RTC、录制、消息通讯RTM等各 SDK 的安全认证形式，相较于原先的 DynmicKey 更加方便于用户使用。
 
 .NET Core 是微软的跨平台开发框架，可运行在 Windows、Linux、macOS 等操作系统之上，通过命令行工具就可以方便的创建、编译、运行，并可搭配 [Docker 容器](https://docs.microsoft.com/zh-cn/dotnet/core/docker/introduction)使用，方便嵌入微服务架构中。
